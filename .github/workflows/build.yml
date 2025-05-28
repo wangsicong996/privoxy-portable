@@ -25,10 +25,11 @@ jobs:
       - name: Download Privoxy source
         run: |
           PRIVOXY_VERSION="3.0.34"
-          # 使用正确的下载链接
-          wget "https://www.privoxy.org/sf-download-mirror/Sources/${PRIVOXY_VERSION}%20(stable)%20src.tar.gz" -O privoxy.tar.gz
+          # 使用正确的 SourceForge 下载链接
+          wget "https://sourceforge.net/projects/ijbswa/files/Sources/3.0.34%20%28stable%29/privoxy-3.0.34-stable-src.tar.gz/download" -O privoxy.tar.gz
           tar -xzf privoxy.tar.gz
-          mv privoxy-${PRIVOXY_VERSION}-stable privoxy-src
+          # 解压后的目录名是 privoxy-3.0.34-stable，不是 privoxy-3.0.34
+          mv privoxy-3.0.34-stable privoxy-src
       
       - name: Configure and compile Privoxy
         run: |
@@ -66,6 +67,7 @@ jobs:
           #!/bin/bash
           DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
           echo "Starting Privoxy on 0.0.0.0:8118..."
+          echo "Press Ctrl+C to stop"
           "$DIR/privoxy" "$DIR/default.config"
           EOF
             chmod +x ../privoxy-package/start-privoxy.sh
@@ -77,6 +79,7 @@ jobs:
           #!/bin/bash
           DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
           echo "Starting Privoxy on 0.0.0.0:8118..."
+          echo "Press Ctrl+C to stop"
           "$DIR/privoxy" "$DIR/default.config"
           EOF
             chmod +x ../privoxy-package/start-privoxy.sh
@@ -85,21 +88,30 @@ jobs:
           # 创建README文件
           cat > ../privoxy-package/README.txt << 'EOF'
           Privoxy Portable Version
+          ========================
           
-          Usage:
-          1. Run ./start-privoxy.sh (Linux/macOS)
-          2. Configure your browser to use HTTP proxy: 127.0.0.1:8118
-          3. Or use it as network proxy server (accessible from other devices): YOUR_IP:8118
+          Quick Start:
+          1. Run: ./start-privoxy.sh
+          2. Configure your browser HTTP proxy to: 127.0.0.1:8118
+          3. Or use as network proxy server: YOUR_COMPUTER_IP:8118
           
-          Configuration file: default.config
+          Files:
+          - privoxy: Main executable
+          - default.config: Configuration file (listens on 0.0.0.0:8118)
+          - start-privoxy.sh: Startup script
+          
+          Note: This version listens on all network interfaces (0.0.0.0:8118)
+          which means other devices on your network can use it as a proxy.
+          
+          To stop: Press Ctrl+C
           EOF
       
-      - name: Package Privoxy for macOS (Tarball)
+      - name: Package Privoxy for macOS
         if: runner.os == 'macOS'
         run: |
           tar -czf privoxy-portable-macos.tar.gz -C privoxy-package .
       
-      - name: Package Privoxy for Linux (Tarball)
+      - name: Package Privoxy for Linux
         if: runner.os == 'Linux'
         run: |
           tar -czf privoxy-portable-linux.tar.gz -C privoxy-package .
