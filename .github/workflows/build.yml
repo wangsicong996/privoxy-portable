@@ -1,0 +1,96 @@
+name: Build Portable Privoxy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install dependencies on macOS
+        if: matrix.os == 'macos-latest'
+        run: brew install autoconf automake pcre
+
+      - name: Install dependencies on Linux
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y autoconf automake libpcre3-dev
+
+      - name: Download Privoxy source
+        run: |
+          PRIVPROXY_VERSION="3.0.34" # Specify a stable Privoxy version
+          wget "https://www.privoxy.org/sf-download-mirror/Sources/${PRIVPROXY_VERSION}%20%28stable%29%20src.tar.gz" -O privoxy.tar.gz
+          tar -xzf privoxy.tar.gz
+          mv privoxy-${PRIVPROXY_VERSION} privoxy-src
+          cd privoxy-src
+
+      - name: Configure and compile Privoxy
+        run: |
+          cd privoxy-src
+          autoheader
+          autoconf
+          ./configure
+          make
+          # Optional: make check (if you want to run tests, might need additional dependencies)
+
+      - name: Modify Privoxy configuration
+        run: |
+          cd privoxy-src # Ensure we are in the correct directory where the default config is
+          cp config default.config # Create a working copy
+          # Use sed to change the listen-address.
+          # For macOS, sed requires an extension for in-place editing backup.
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            sed -i '.bak' 's/^listen-address  127.0.0.1:8118/listen-address  0.0.0.0:8118/' default.config
+            sed -i '.bak' 's/^listen-address  \[::1\]:8118/#listen-address  \[::1\]:8118/' default.config # Also disable IPv6 localhost
+          else
+            sed -i 's/^listen-address  127.0.0.1:8118/listen-address  0.0.0.0:8118/' default.config
+            sed -i 's/^listen-address  \[::1\]:8118/#listen-address  \[::1\]:8118/' default.config # Also disable IPv6 localhost
+          fi
+          echo "Verifying config modification:"
+          grep "listen-address  0.0.0.0:8118" default.config
+
+      - name: Create packaging directory
+        run: |
+          mkdir privoxy-package
+          cd privoxy-src
+          cp privoxy ../privoxy-package/
+          cp default.config ../privoxy-package/
+          # For Linux, also create a simple launch script
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            echo '#!/bin/bash' > ../privoxy-package/start-privoxy.sh
+            echo 'DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"' >> ../privoxy-package/start-privoxy.sh
+            echo '$DIR/privoxy $DIR/default.config' >> ../privoxy-package/start-privoxy.sh
+            chmod +x ../privoxy-package/start-privoxy.sh
+          fi
+          cd .. # Back to GITHUB_WORKSPACE
+
+      - name: Package Privoxy for macOS (DMG)
+        if: runner.os == 'macOS'
+        run: |
+          cd privoxy-package
+          hdiutil create -fs HFS+ -volname "Privoxy" -srcfolder . privoxy_macOS.dmg
+          cd ..
+
+      - name: Package Privoxy for Linux (Tarball)
+        if: runner.os == 'Linux'
+        run: |
+          cd privoxy-package
+          tar -czvf privoxy_linux.tar.gz .
+          cd ..
+
+      - name: Upload Privoxy artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: privoxy-portable-${{ matrix.os }}
+          path: |
+            privoxy-package/privoxy_macOS.dmg
+            privoxy-package/privoxy_linux.tar.gz
+          if-no-files-found: error
