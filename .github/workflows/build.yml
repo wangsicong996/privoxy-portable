@@ -14,7 +14,7 @@ jobs:
         os: [macos-latest, ubuntu-latest]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install dependencies on macOS
         if: matrix.os == 'macos-latest'
@@ -87,7 +87,7 @@ jobs:
           cd ..
 
       - name: Upload Privoxy artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: privoxy-portable-${{ matrix.os }}
           path: |
