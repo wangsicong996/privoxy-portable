@@ -4,14 +4,12 @@ on:
   push:
     branches:
       - main
-
 jobs:
   build:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [macos-latest, ubuntu-latest]
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -22,142 +20,94 @@ jobs:
       
       - name: Install dependencies on Linux
         if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y autoconf automake libpcre3-dev build-essential
+        run: sudo apt-get update && sudo apt-get install -y autoconf automake libpcre3-dev
       
       - name: Download Privoxy source
         run: |
           PRIVOXY_VERSION="3.0.34"
-          # 使用正确的 SourceForge 下载链接
-          wget "https://sourceforge.net/projects/ijbswa/files/Sources/3.0.34%20%28stable%29/privoxy-3.0.34-stable-src.tar.gz/download" -O privoxy.tar.gz
+          # 使用正确的下载链接
+          wget "https://www.privoxy.org/sf-download-mirror/Sources/${PRIVOXY_VERSION}%20(stable)%20src.tar.gz" -O privoxy.tar.gz
           tar -xzf privoxy.tar.gz
-          # 解压后的目录名是 privoxy-3.0.34-stable，不是 privoxy-3.0.34
-          mv privoxy-3.0.34-stable privoxy-src
+          mv privoxy-${PRIVOXY_VERSION}-stable privoxy-src
       
       - name: Configure and compile Privoxy
         run: |
           cd privoxy-src
           autoheader
           autoconf
-          ./configure --prefix=$(pwd)/install
+          ./configure --enable-static
           make
-          # 可选：运行测试
-          # make check
       
-      - name: Create portable package structure
+      - name: Modify Privoxy configuration
         run: |
-          mkdir -p privoxy-package
           cd privoxy-src
-          
-          # 复制可执行文件
-          cp privoxy ../privoxy-package/
-          
-          # 复制并修改配置文件
-          cp config ../privoxy-package/privoxy.config
-          
-          # 复制其他必需文件
-          cp -r templates ../privoxy-package/
-          if [ -d "doc" ]; then
-            cp -r doc ../privoxy-package/
-          fi
-          
-          cd ../privoxy-package
-          
-          # 修改配置文件，将监听地址改为 0.0.0.0:8118
+          cp config default.config
+          # 修改配置文件，让Privoxy监听所有网络接口
           if [[ "$RUNNER_OS" == "macOS" ]]; then
-            # macOS 的 sed 需要备份扩展名
-            sed -i '.bak' 's/^listen-address  127.0.0.1:8118/listen-address  0.0.0.0:8118/' privoxy.config
-            sed -i '.bak' 's/^listen-address  \[::1\]:8118/#listen-address  [::1]:8118/' privoxy.config
-            # 删除备份文件
-            rm -f privoxy.config.bak
+            sed -i '.bak' 's/^listen-address  127.0.0.1:8118/listen-address  0.0.0.0:8118/' default.config
+            sed -i '.bak' 's/^listen-address  \[::1\]:8118/#listen-address  [::1]:8118/' default.config
           else
-            sed -i 's/^listen-address  127.0.0.1:8118/listen-address  0.0.0.0:8118/' privoxy.config
-            sed -i 's/^listen-address  \[::1\]:8118/#listen-address  [::1]:8118/' privoxy.config
+            sed -i 's/^listen-address  127.0.0.1:8118/listen-address  0.0.0.0:8118/' default.config
+            sed -i 's/^listen-address  \[::1\]:8118/#listen-address  [::1]:8118/' default.config
           fi
-          
-          # 验证配置修改
-          echo "=== 验证配置文件修改 ==="
-          grep -n "listen-address" privoxy.config || echo "未找到 listen-address 配置"
+          echo "验证配置修改："
+          grep "listen-address" default.config | head -5
       
-      - name: Create launch scripts
+      - name: Create packaging directory
         run: |
-          cd privoxy-package
+          mkdir privoxy-package
+          cd privoxy-src
+          cp privoxy ../privoxy-package/
+          cp default.config ../privoxy-package/
           
-          # 为 Linux 创建启动脚本
+          # 为Linux创建启动脚本
           if [[ "$RUNNER_OS" == "Linux" ]]; then
-            cat > start-privoxy.sh << 'EOF'
-#!/bin/bash
-# Privoxy 启动脚本
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-echo "启动 Privoxy..."
-echo "配置文件: $DIR/privoxy.config"
-echo "访问地址: http://0.0.0.0:8118"
-echo "按 Ctrl+C 停止"
-exec "$DIR/privoxy" "$DIR/privoxy.config"
-EOF
-            chmod +x start-privoxy.sh
+            cat > ../privoxy-package/start-privoxy.sh << 'EOF'
+          #!/bin/bash
+          DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+          echo "Starting Privoxy on 0.0.0.0:8118..."
+          "$DIR/privoxy" "$DIR/default.config"
+          EOF
+            chmod +x ../privoxy-package/start-privoxy.sh
           fi
           
-          # 为 macOS 创建启动脚本
+          # 为macOS创建启动脚本
           if [[ "$RUNNER_OS" == "macOS" ]]; then
-            cat > start-privoxy.sh << 'EOF'
-#!/bin/bash
-# Privoxy 启动脚本
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-echo "启动 Privoxy..."
-echo "配置文件: $DIR/privoxy.config"
-echo "访问地址: http://0.0.0.0:8118"
-echo "按 Ctrl+C 停止"
-exec "$DIR/privoxy" "$DIR/privoxy.config"
-EOF
-            chmod +x start-privoxy.sh
+            cat > ../privoxy-package/start-privoxy.sh << 'EOF'
+          #!/bin/bash
+          DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+          echo "Starting Privoxy on 0.0.0.0:8118..."
+          "$DIR/privoxy" "$DIR/default.config"
+          EOF
+            chmod +x ../privoxy-package/start-privoxy.sh
           fi
           
-          # 创建 README 文件
-          cat > README.txt << 'EOF'
-Privoxy Portable 版本使用说明
-================================
-
-启动方法：
-1. 在终端中运行: ./start-privoxy.sh
-2. 或者直接运行: ./privoxy privoxy.config
-
-配置信息：
-- 监听地址: 0.0.0.0:8118
-- 配置文件: privoxy.config
-- 模板目录: templates/
-
-使用方法：
-1. 启动 Privoxy
-2. 在浏览器中设置 HTTP 代理为: 127.0.0.1:8118
-3. 访问 http://config.privoxy.org/ 进行配置管理
-
-注意事项：
-- 此版本配置为监听所有网络接口 (0.0.0.0)
-- 请根据安全需要调整防火墙设置
-- 可以编辑 privoxy.config 文件自定义配置
-EOF
+          # 创建README文件
+          cat > ../privoxy-package/README.txt << 'EOF'
+          Privoxy Portable Version
+          
+          Usage:
+          1. Run ./start-privoxy.sh (Linux/macOS)
+          2. Configure your browser to use HTTP proxy: 127.0.0.1:8118
+          3. Or use it as network proxy server (accessible from other devices): YOUR_IP:8118
+          
+          Configuration file: default.config
+          EOF
       
-      - name: Package for macOS
+      - name: Package Privoxy for macOS (Tarball)
         if: runner.os == 'macOS'
         run: |
-          cd privoxy-package
-          # 创建 DMG 包
-          hdiutil create -fs HFS+ -volname "Privoxy-Portable" -srcfolder . ../privoxy-portable-macos.dmg
-          # 同时创建 tar.gz 包作为备选
-          tar -czf ../privoxy-portable-macos.tar.gz .
+          tar -czf privoxy-portable-macos.tar.gz -C privoxy-package .
       
-      - name: Package for Linux
+      - name: Package Privoxy for Linux (Tarball)
         if: runner.os == 'Linux'
         run: |
-          # 创建 tar.gz 包
           tar -czf privoxy-portable-linux.tar.gz -C privoxy-package .
       
-      - name: Upload artifacts
+      - name: Upload Privoxy artifact
         uses: actions/upload-artifact@v4
         with:
-          name: privoxy-portable-${{ runner.os }}-${{ runner.arch }}
+          name: privoxy-portable-${{ runner.os }}
           path: |
-            privoxy-portable-*.dmg
             privoxy-portable-*.tar.gz
           if-no-files-found: error
-          retention-days: 30
